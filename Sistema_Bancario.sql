@@ -1,0 +1,1059 @@
+
+-- ============================================
+-- PARTE 1: ESTRUTURA DO BANCO
+-- ============================================
+
+-- Garantir que estamos usando o schema public
+SET search_path TO public;
+
+-- ============================================
+-- TABELAS PRINCIPAIS
+-- ============================================
+
+-- Tabela: Clientes
+CREATE TABLE IF NOT EXISTS public.clientes (
+    id_cliente SERIAL PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    cpf VARCHAR(14) UNIQUE NOT NULL,
+    data_nascimento DATE NOT NULL,
+    email VARCHAR(100),
+    telefone VARCHAR(20),
+    endereco VARCHAR(200),
+    cidade VARCHAR(100),
+    estado VARCHAR(2),
+    cep VARCHAR(10),
+    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo', 'bloqueado'))
+);
+
+-- Tabela: Tipos de Conta
+CREATE TABLE IF NOT EXISTS public.tipos_conta (
+    id_tipo SERIAL PRIMARY KEY,
+    nome VARCHAR(50) NOT NULL UNIQUE,
+    descricao TEXT,
+    taxa_manutencao DECIMAL(10, 2) DEFAULT 0.00,
+    saldo_minimo DECIMAL(15, 2) DEFAULT 0.00,
+    limite_saque_diario DECIMAL(15, 2)
+);
+
+-- Tabela: Contas
+CREATE TABLE IF NOT EXISTS public.contas (
+    id_conta SERIAL PRIMARY KEY,
+    id_cliente INT NOT NULL,
+    id_tipo INT NOT NULL,
+    numero_conta VARCHAR(20) UNIQUE NOT NULL,
+    agencia VARCHAR(10) NOT NULL,
+    saldo DECIMAL(15, 2) DEFAULT 0.00,
+    data_abertura DATE DEFAULT CURRENT_DATE,
+    status VARCHAR(20) DEFAULT 'ativa' CHECK (status IN ('ativa', 'inativa', 'bloqueada', 'encerrada')),
+    FOREIGN KEY (id_cliente) REFERENCES public.clientes(id_cliente),
+    FOREIGN KEY (id_tipo) REFERENCES public.tipos_conta(id_tipo)
+);
+
+-- Tabela: Tipos de Transação
+CREATE TABLE IF NOT EXISTS public.tipos_transacao (
+    id_tipo_transacao SERIAL PRIMARY KEY,
+    nome VARCHAR(50) NOT NULL UNIQUE,
+    descricao TEXT,
+    taxa DECIMAL(10, 2) DEFAULT 0.00
+);
+
+-- Tabela: Transações
+CREATE TABLE IF NOT EXISTS public.transacoes (
+    id_transacao SERIAL PRIMARY KEY,
+    id_tipo_transacao INT NOT NULL,
+    id_conta_origem INT,
+    id_conta_destino INT,
+    valor DECIMAL(15, 2) NOT NULL,
+    data_transacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    descricao VARCHAR(200),
+    status VARCHAR(20) DEFAULT 'concluida' CHECK (status IN ('pendente', 'concluida', 'cancelada', 'estornada')),
+    saldo_anterior_origem DECIMAL(15, 2),
+    saldo_posterior_origem DECIMAL(15, 2),
+    saldo_anterior_destino DECIMAL(15, 2),
+    saldo_posterior_destino DECIMAL(15, 2),
+    FOREIGN KEY (id_tipo_transacao) REFERENCES public.tipos_transacao(id_tipo_transacao),
+    FOREIGN KEY (id_conta_origem) REFERENCES public.contas(id_conta),
+    FOREIGN KEY (id_conta_destino) REFERENCES public.contas(id_conta),
+    CHECK (valor > 0)
+);
+
+-- Tabela: Cartões
+CREATE TABLE IF NOT EXISTS public.cartoes (
+    id_cartao SERIAL PRIMARY KEY,
+    id_conta INT NOT NULL,
+    numero_cartao VARCHAR(19) UNIQUE NOT NULL,
+    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('debito', 'credito')),
+    bandeira VARCHAR(20) NOT NULL CHECK (bandeira IN ('Visa', 'Mastercard', 'Elo', 'Hipercard')),
+    data_emissao DATE DEFAULT CURRENT_DATE,
+    data_validade DATE NOT NULL,
+    cvv VARCHAR(4) NOT NULL,
+    limite_credito DECIMAL(15, 2),
+    status VARCHAR(20) DEFAULT 'ativo' CHECK (status IN ('ativo', 'bloqueado', 'cancelado')),
+    FOREIGN KEY (id_conta) REFERENCES public.contas(id_conta)
+);
+
+-- Tabela: Empréstimos
+CREATE TABLE IF NOT EXISTS public.emprestimos (
+    id_emprestimo SERIAL PRIMARY KEY,
+    id_conta INT NOT NULL,
+    valor_solicitado DECIMAL(15, 2) NOT NULL,
+    valor_aprovado DECIMAL(15, 2),
+    taxa_juros DECIMAL(5, 2) NOT NULL,
+    prazo_meses INT NOT NULL,
+    data_solicitacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    data_aprovacao TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'solicitado' CHECK (status IN ('solicitado', 'aprovado', 'reprovado', 'quitado', 'inadimplente')),
+    FOREIGN KEY (id_conta) REFERENCES public.contas(id_conta),
+    CHECK (valor_solicitado > 0),
+    CHECK (prazo_meses > 0)
+);
+
+-- ============================================
+-- ÍNDICES PARA PERFORMANCE
+-- ============================================
+
+CREATE INDEX IF NOT EXISTS idx_clientes_cpf ON public.clientes(cpf);
+CREATE INDEX IF NOT EXISTS idx_clientes_status ON public.clientes(status);
+CREATE INDEX IF NOT EXISTS idx_contas_numero ON public.contas(numero_conta);
+CREATE INDEX IF NOT EXISTS idx_contas_cliente ON public.contas(id_cliente);
+CREATE INDEX IF NOT EXISTS idx_transacoes_data ON public.transacoes(data_transacao);
+CREATE INDEX IF NOT EXISTS idx_transacoes_conta_origem ON public.transacoes(id_conta_origem);
+CREATE INDEX IF NOT EXISTS idx_transacoes_conta_destino ON public.transacoes(id_conta_destino);
+CREATE INDEX IF NOT EXISTS idx_cartoes_numero ON public.cartoes(numero_cartao);
+CREATE INDEX IF NOT EXISTS idx_emprestimos_status ON public.emprestimos(status);
+
+-- ============================================
+-- DADOS DE EXEMPLO
+-- ============================================
+
+-- Tipos de Conta
+INSERT INTO public.tipos_conta (nome, descricao, taxa_manutencao, saldo_minimo, limite_saque_diario) VALUES
+('Conta Corrente', 'Conta corrente padrão', 15.00, 0.00, 2000.00),
+('Conta Poupança', 'Conta poupança com rendimento', 0.00, 0.00, 1000.00),
+('Conta Universitária', 'Conta para estudantes sem taxas', 0.00, 0.00, 500.00),
+('Conta Premium', 'Conta com benefícios exclusivos', 50.00, 5000.00, 10000.00)
+ON CONFLICT (nome) DO NOTHING;
+
+-- Tipos de Transação
+INSERT INTO public.tipos_transacao (nome, descricao, taxa) VALUES
+('Depósito', 'Depósito em conta', 0.00),
+('Saque', 'Saque em dinheiro', 0.00),
+('Transferência', 'Transferência entre contas', 0.00),
+('PIX', 'Transferência via PIX', 0.00),
+('TED', 'Transferência TED', 10.00),
+('DOC', 'Transferência DOC', 5.00)
+ON CONFLICT (nome) DO NOTHING;
+
+-- Clientes de Exemplo
+INSERT INTO public.clientes (nome, cpf, data_nascimento, email, telefone, endereco, cidade, estado, cep) VALUES
+('João Silva', '123.456.789-00', '1985-03-15', 'joao.silva@email.com', '(11) 98765-4321', 'Rua das Flores, 123', 'São Paulo', 'SP', '01234-567'),
+('Maria Santos', '987.654.321-00', '1990-07-22', 'maria.santos@email.com', '(21) 99876-5432', 'Av. Atlântica, 456', 'Rio de Janeiro', 'RJ', '22041-001'),
+('Pedro Oliveira', '456.789.123-00', '1988-11-10', 'pedro.oliveira@email.com', '(31) 97654-3210', 'Praça da Liberdade, 789', 'Belo Horizonte', 'MG', '30140-010'),
+('Ana Costa', '789.123.456-00', '1995-02-28', 'ana.costa@email.com', '(85) 96543-2109', 'Rua do Sol, 321', 'Fortaleza', 'CE', '60060-120'),
+('Carlos Souza', '321.654.987-00', '1982-09-05', 'carlos.souza@email.com', '(11) 95432-1098', 'Av. Paulista, 1000', 'São Paulo', 'SP', '01310-100')
+ON CONFLICT (cpf) DO NOTHING;
+
+-- Contas de Exemplo
+INSERT INTO public.contas (id_cliente, id_tipo, numero_conta, agencia, saldo) VALUES
+(1, 1, '0001-12345-6', '0001', 5000.00),
+(2, 2, '0001-23456-7', '0001', 10000.00),
+(3, 3, '0001-34567-8', '0001', 1500.00),
+(4, 4, '0001-45678-9', '0001', 25000.00),
+(5, 1, '0001-56789-0', '0001', 7500.00)
+ON CONFLICT (numero_conta) DO NOTHING;
+
+-- Transações de Exemplo
+INSERT INTO public.transacoes (id_tipo_transacao, id_conta_origem, id_conta_destino, valor, descricao, saldo_anterior_origem, saldo_posterior_origem) VALUES
+(1, NULL, 1, 1000.00, 'Depósito inicial', 0.00, 1000.00),
+(1, NULL, 2, 5000.00, 'Depósito inicial', 0.00, 5000.00),
+(3, 1, 2, 500.00, 'Transferência teste', 1000.00, 500.00),
+(4, 2, 3, 200.00, 'PIX para amigo', 5500.00, 5300.00),
+(2, 3, NULL, 100.00, 'Saque em caixa', 200.00, 100.00),
+(5, 4, 5, 1000.00, 'TED pagamento', 25000.00, 24000.00),
+(1, NULL, 1, 2000.00, 'Salário', 500.00, 2500.00),
+(4, 1, 4, 300.00, 'PIX pagamento conta', 2500.00, 2200.00),
+(3, 5, 1, 500.00, 'Transferência devolução', 7500.00, 7000.00),
+(2, 2, NULL, 1000.00, 'Saque emergencial', 5300.00, 4300.00);
+
+-- Cartões de Exemplo
+INSERT INTO public.cartoes (id_conta, numero_cartao, tipo, bandeira, data_validade, cvv, limite_credito) VALUES
+(1, '4532-1234-5678-9010', 'debito', 'Visa', '2027-12-31', '123', NULL),
+(2, '5412-7534-8901-2345', 'credito', 'Mastercard', '2026-06-30', '456', 5000.00),
+(3, '6362-9701-2345-6789', 'debito', 'Elo', '2028-03-31', '789', NULL),
+(4, '3841-0123-4567-8901', 'credito', 'Hipercard', '2027-09-30', '321', 15000.00),
+(5, '4539-9876-5432-1098', 'credito', 'Visa', '2026-12-31', '654', 8000.00)
+ON CONFLICT (numero_cartao) DO NOTHING;
+
+-- Empréstimos de Exemplo
+INSERT INTO public.emprestimos (id_conta, valor_solicitado, valor_aprovado, taxa_juros, prazo_meses, data_aprovacao, status) VALUES
+(1, 10000.00, 10000.00, 2.5, 24, CURRENT_TIMESTAMP, 'aprovado'),
+(3, 5000.00, 4000.00, 3.0, 12, CURRENT_TIMESTAMP, 'aprovado'),
+(5, 20000.00, NULL, 2.8, 36, NULL, 'solicitado');
+
+-- ============================================
+-- PARTE 2: FUNÇÕES E PROCEDURES
+-- ============================================
+
+-- Função: Realizar Transferência
+CREATE OR REPLACE FUNCTION public.realizar_transferencia(
+    p_conta_origem VARCHAR(20),
+    p_conta_destino VARCHAR(20),
+    p_valor DECIMAL(15, 2),
+    p_descricao VARCHAR(200) DEFAULT 'Transferência'
+)
+RETURNS TEXT AS $$
+DECLARE
+    v_id_conta_origem INT;
+    v_id_conta_destino INT;
+    v_saldo_origem DECIMAL(15, 2);
+    v_id_tipo_transacao INT;
+BEGIN
+    -- Buscar IDs das contas
+    SELECT id_conta, saldo INTO v_id_conta_origem, v_saldo_origem
+    FROM public.contas WHERE numero_conta = p_conta_origem AND status = 'ativa';
+    
+    SELECT id_conta INTO v_id_conta_destino
+    FROM public.contas WHERE numero_conta = p_conta_destino AND status = 'ativa';
+    
+    -- Validações
+    IF v_id_conta_origem IS NULL THEN
+        RETURN 'ERRO: Conta de origem não encontrada ou inativa';
+    END IF;
+    
+    IF v_id_conta_destino IS NULL THEN
+        RETURN 'ERRO: Conta de destino não encontrada ou inativa';
+    END IF;
+    
+    IF v_saldo_origem < p_valor THEN
+        RETURN 'ERRO: Saldo insuficiente';
+    END IF;
+    
+    IF p_valor <= 0 THEN
+        RETURN 'ERRO: Valor deve ser maior que zero';
+    END IF;
+    
+    -- Buscar tipo de transação
+    SELECT id_tipo_transacao INTO v_id_tipo_transacao
+    FROM public.tipos_transacao WHERE nome = 'Transferência';
+    
+    -- Atualizar saldos
+    UPDATE public.contas SET saldo = saldo - p_valor WHERE id_conta = v_id_conta_origem;
+    UPDATE public.contas SET saldo = saldo + p_valor WHERE id_conta = v_id_conta_destino;
+    
+    -- Registrar transação
+    INSERT INTO public.transacoes (
+        id_tipo_transacao, id_conta_origem, id_conta_destino, valor, descricao,
+        saldo_anterior_origem, saldo_posterior_origem
+    ) VALUES (
+        v_id_tipo_transacao, v_id_conta_origem, v_id_conta_destino, p_valor, p_descricao,
+        v_saldo_origem, v_saldo_origem - p_valor
+    );
+    
+    RETURN 'SUCESSO: Transferência realizada com sucesso';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Consultar Saldo
+CREATE OR REPLACE FUNCTION public.consultar_saldo(p_numero_conta VARCHAR(20))
+RETURNS TABLE (
+    numero_conta VARCHAR(20),
+    titular VARCHAR(100),
+    tipo_conta VARCHAR(50),
+    saldo DECIMAL(15, 2),
+    status VARCHAR(20)
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        c.numero_conta,
+        cl.nome AS titular,
+        tc.nome AS tipo_conta,
+        c.saldo,
+        c.status
+    FROM public.contas c
+    JOIN public.clientes cl ON c.id_cliente = cl.id_cliente
+    JOIN public.tipos_conta tc ON c.id_tipo = tc.id_tipo
+    WHERE c.numero_conta = p_numero_conta;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Extrato por Período
+CREATE OR REPLACE FUNCTION public.extrato_periodo(
+    p_numero_conta VARCHAR(20),
+    p_data_inicio DATE,
+    p_data_fim DATE
+)
+RETURNS TABLE (
+    data_transacao TIMESTAMP,
+    tipo_transacao VARCHAR(50),
+    valor DECIMAL(15, 2),
+    descricao VARCHAR(200),
+    operacao TEXT,
+    status VARCHAR(20)
+) AS $$
+DECLARE
+    v_id_conta INT;
+BEGIN
+    SELECT id_conta INTO v_id_conta FROM public.contas WHERE numero_conta = p_numero_conta;
+    
+    IF v_id_conta IS NULL THEN
+        RAISE EXCEPTION 'Conta % não encontrada', p_numero_conta;
+    END IF;
+    
+    RETURN QUERY
+    SELECT 
+        t.data_transacao,
+        tt.nome AS tipo_transacao,
+        t.valor,
+        COALESCE(t.descricao, 'Sem descrição') AS descricao,
+        CASE 
+            WHEN t.id_conta_origem = v_id_conta THEN 'Débito'
+            WHEN t.id_conta_destino = v_id_conta THEN 'Crédito'
+            ELSE 'Desconhecido'
+        END AS operacao,
+        t.status
+    FROM public.transacoes t
+    JOIN public.tipos_transacao tt ON t.id_tipo_transacao = tt.id_tipo_transacao
+    WHERE (t.id_conta_origem = v_id_conta OR t.id_conta_destino = v_id_conta)
+    AND DATE(t.data_transacao) BETWEEN p_data_inicio AND p_data_fim
+    ORDER BY t.data_transacao DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Versão TEXT da função extrato_periodo
+CREATE OR REPLACE FUNCTION public.extrato_periodo(
+    p_numero_conta TEXT,
+    p_data_inicio TEXT,
+    p_data_fim TEXT
+)
+RETURNS TABLE (
+    data_transacao TIMESTAMP,
+    tipo_transacao VARCHAR(50),
+    valor DECIMAL(15, 2),
+    descricao VARCHAR(200),
+    operacao TEXT,
+    status VARCHAR(20)
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM public.extrato_periodo(
+        p_numero_conta::VARCHAR(20),
+        p_data_inicio::DATE,
+        p_data_fim::DATE
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- PARTE 3: VIEWS DE ANÁLISE (SEM NULL)
+-- ============================================
+
+-- View: Dashboard Geral
+CREATE OR REPLACE VIEW public.dashboard_geral AS
+SELECT 
+    COALESCE((SELECT COUNT(*) FROM public.clientes WHERE status = 'ativo'), 0) as total_clientes_ativos,
+    COALESCE((SELECT COUNT(*) FROM public.clientes WHERE DATE(data_cadastro) >= DATE_TRUNC('month', CURRENT_DATE)), 0) as novos_clientes_mes,
+    COALESCE((SELECT COUNT(*) FROM public.clientes WHERE status = 'bloqueado'), 0) as clientes_bloqueados,
+    COALESCE((SELECT COUNT(*) FROM public.contas WHERE status = 'ativa'), 0) as total_contas_ativas,
+    COALESCE((SELECT SUM(saldo) FROM public.contas WHERE status = 'ativa'), 0.00) as saldo_total_banco,
+    COALESCE((SELECT AVG(saldo) FROM public.contas WHERE status = 'ativa'), 0.00) as saldo_medio_conta,
+    COALESCE((SELECT COUNT(*) FROM public.transacoes WHERE DATE(data_transacao) = CURRENT_DATE), 0) as transacoes_hoje,
+    COALESCE((SELECT SUM(valor) FROM public.transacoes WHERE DATE(data_transacao) = CURRENT_DATE), 0.00) as volume_hoje,
+    COALESCE((SELECT COUNT(*) FROM public.transacoes WHERE DATE(data_transacao) >= DATE_TRUNC('month', CURRENT_DATE)), 0) as transacoes_mes,
+    COALESCE((SELECT SUM(valor) FROM public.transacoes WHERE DATE(data_transacao) >= DATE_TRUNC('month', CURRENT_DATE)), 0.00) as volume_mes,
+    COALESCE((SELECT COUNT(*) FROM public.emprestimos WHERE status = 'aprovado'), 0) as emprestimos_ativos,
+    COALESCE((SELECT SUM(valor_aprovado) FROM public.emprestimos WHERE status = 'aprovado'), 0.00) as total_emprestimos,
+    COALESCE((SELECT COUNT(*) FROM public.emprestimos WHERE status = 'inadimplente'), 0) as emprestimos_inadimplentes,
+    COALESCE((SELECT COUNT(*) FROM public.cartoes WHERE status = 'ativo'), 0) as cartoes_ativos,
+    COALESCE((SELECT SUM(limite_credito) FROM public.cartoes WHERE tipo = 'credito' AND status = 'ativo'), 0.00) as limite_credito_total;
+
+-- View: Análise de Transações por Tipo
+CREATE OR REPLACE VIEW public.analise_transacoes_tipo AS
+SELECT 
+    tt.nome as tipo_transacao,
+    COALESCE(COUNT(*), 0) as quantidade,
+    COALESCE(SUM(t.valor), 0.00) as valor_total,
+    COALESCE(AVG(t.valor), 0.00) as valor_medio,
+    COALESCE(MIN(t.valor), 0.00) as valor_minimo,
+    COALESCE(MAX(t.valor), 0.00) as valor_maximo,
+    COALESCE(ROUND(COUNT(*)::NUMERIC / NULLIF((SELECT COUNT(*) FROM public.transacoes WHERE data_transacao >= CURRENT_DATE - INTERVAL '30 days'), 0) * 100, 2), 0.00) as percentual_total
+FROM public.transacoes t
+JOIN public.tipos_transacao tt ON t.id_tipo_transacao = tt.id_tipo_transacao
+WHERE t.data_transacao >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY tt.nome
+ORDER BY valor_total DESC;
+
+-- View: Transações por Dia
+CREATE OR REPLACE VIEW public.transacoes_por_dia AS
+SELECT 
+    DATE(data_transacao) as data,
+    COALESCE(COUNT(*), 0) as total_transacoes,
+    COALESCE(SUM(valor), 0.00) as volume_total,
+    COALESCE(AVG(valor), 0.00) as ticket_medio,
+    COALESCE(COUNT(DISTINCT COALESCE(id_conta_origem, id_conta_destino)), 0) as contas_ativas
+FROM public.transacoes
+WHERE data_transacao >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY DATE(data_transacao)
+ORDER BY data DESC;
+
+-- View: Transações por Hora
+CREATE OR REPLACE VIEW public.transacoes_por_hora AS
+SELECT 
+    EXTRACT(HOUR FROM data_transacao)::INT as hora,
+    COALESCE(COUNT(*), 0) as total_transacoes,
+    COALESCE(SUM(valor), 0.00) as volume_total,
+    COALESCE(AVG(valor), 0.00) as ticket_medio
+FROM public.transacoes
+WHERE data_transacao >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY EXTRACT(HOUR FROM data_transacao)
+ORDER BY hora;
+
+-- View: Top Clientes por Saldo
+CREATE OR REPLACE VIEW public.top_clientes_saldo AS
+SELECT 
+    cl.id_cliente,
+    cl.nome,
+    cl.cpf,
+    COALESCE(cl.cidade, 'Não informado') as cidade,
+    COALESCE(cl.estado, '--') as estado,
+    COALESCE(COUNT(c.id_conta), 0) as total_contas,
+    COALESCE(SUM(c.saldo), 0.00) as saldo_total,
+    COALESCE((SELECT COUNT(*) FROM public.transacoes t 
+     WHERE t.id_conta_origem IN (SELECT id_conta FROM public.contas WHERE id_cliente = cl.id_cliente)
+     AND t.data_transacao >= CURRENT_DATE - INTERVAL '30 days'), 0) as transacoes_mes
+FROM public.clientes cl
+JOIN public.contas c ON cl.id_cliente = c.id_cliente
+WHERE cl.status = 'ativo' AND c.status = 'ativa'
+GROUP BY cl.id_cliente
+ORDER BY saldo_total DESC
+LIMIT 20;
+
+-- View: Clientes Mais Ativos
+CREATE OR REPLACE VIEW public.clientes_mais_ativos AS
+SELECT 
+    cl.id_cliente,
+    cl.nome,
+    COALESCE(cl.email, 'Não informado') as email,
+    COALESCE(COUNT(t.id_transacao), 0) as total_transacoes,
+    COALESCE(SUM(t.valor), 0.00) as volume_transacionado,
+    COALESCE(AVG(t.valor), 0.00) as ticket_medio,
+    COALESCE(MAX(t.data_transacao), cl.data_cadastro) as ultima_transacao
+FROM public.clientes cl
+JOIN public.contas c ON cl.id_cliente = c.id_cliente
+LEFT JOIN public.transacoes t ON (c.id_conta = t.id_conta_origem OR c.id_conta = t.id_conta_destino)
+WHERE t.data_transacao >= CURRENT_DATE - INTERVAL '30 days' OR t.data_transacao IS NULL
+GROUP BY cl.id_cliente, cl.data_cadastro
+HAVING COUNT(t.id_transacao) > 0
+ORDER BY total_transacoes DESC
+LIMIT 20;
+
+-- View: Clientes por Estado
+CREATE OR REPLACE VIEW public.clientes_por_estado AS
+SELECT 
+    COALESCE(estado, 'Não informado') as estado,
+    COALESCE(COUNT(DISTINCT cl.id_cliente), 0) as total_clientes,
+    COALESCE(COUNT(c.id_conta), 0) as total_contas,
+    COALESCE(SUM(c.saldo), 0.00) as saldo_total,
+    COALESCE(AVG(c.saldo), 0.00) as saldo_medio
+FROM public.clientes cl
+LEFT JOIN public.contas c ON cl.id_cliente = c.id_cliente
+WHERE cl.status = 'ativo'
+GROUP BY estado
+ORDER BY total_clientes DESC;
+
+-- View: Clientes por Faixa Etária
+CREATE OR REPLACE VIEW public.clientes_por_faixa_etaria AS
+SELECT 
+    CASE 
+        WHEN EXTRACT(YEAR FROM AGE(data_nascimento)) < 25 THEN '18-24'
+        WHEN EXTRACT(YEAR FROM AGE(data_nascimento)) < 35 THEN '25-34'
+        WHEN EXTRACT(YEAR FROM AGE(data_nascimento)) < 45 THEN '35-44'
+        WHEN EXTRACT(YEAR FROM AGE(data_nascimento)) < 55 THEN '45-54'
+        WHEN EXTRACT(YEAR FROM AGE(data_nascimento)) < 65 THEN '55-64'
+        ELSE '65+'
+    END as faixa_etaria,
+    COALESCE(COUNT(*), 0) as total_clientes,
+    COALESCE(SUM(c.saldo), 0.00) as saldo_total,
+    COALESCE(AVG(c.saldo), 0.00) as saldo_medio
+FROM public.clientes cl
+LEFT JOIN public.contas c ON cl.id_cliente = c.id_cliente
+WHERE cl.status = 'ativo'
+GROUP BY faixa_etaria
+ORDER BY faixa_etaria;
+
+-- View: Receitas por Produto
+CREATE OR REPLACE VIEW public.receitas_por_produto AS
+SELECT 
+    'Taxas de Manutenção' as produto,
+    COALESCE(COUNT(c.id_conta), 0) as quantidade,
+    COALESCE(SUM(tc.taxa_manutencao), 0.00) as receita_mensal,
+    COALESCE(SUM(tc.taxa_manutencao) * 12, 0.00) as receita_anual_projetada
+FROM public.contas c
+JOIN public.tipos_conta tc ON c.id_tipo = tc.id_tipo
+WHERE c.status = 'ativa' AND tc.taxa_manutencao > 0
+UNION ALL
+SELECT 
+    'Juros de Empréstimos' as produto,
+    COALESCE(COUNT(*), 0) as quantidade,
+    COALESCE(SUM(valor_aprovado * taxa_juros / 100), 0.00) as receita_mensal,
+    COALESCE(SUM(valor_aprovado * taxa_juros / 100 * prazo_meses), 0.00) as receita_total
+FROM public.emprestimos
+WHERE status IN ('aprovado', 'inadimplente')
+ORDER BY receita_mensal DESC;
+
+-- View: Análise de Empréstimos
+CREATE OR REPLACE VIEW public.analise_emprestimos AS
+SELECT 
+    status,
+    COALESCE(COUNT(*), 0) as quantidade,
+    COALESCE(SUM(valor_solicitado), 0.00) as valor_total_solicitado,
+    COALESCE(SUM(valor_aprovado), 0.00) as valor_total_aprovado,
+    COALESCE(AVG(valor_aprovado), 0.00) as valor_medio,
+    COALESCE(AVG(taxa_juros), 0.00) as taxa_media,
+    COALESCE(AVG(prazo_meses), 0) as prazo_medio
+FROM public.emprestimos
+GROUP BY status
+ORDER BY quantidade DESC;
+
+-- View: Taxa de Aprovação de Empréstimos
+CREATE OR REPLACE VIEW public.taxa_aprovacao_emprestimos AS
+SELECT 
+    COALESCE(COUNT(*) FILTER (WHERE status = 'aprovado'), 0) as aprovados,
+    COALESCE(COUNT(*) FILTER (WHERE status = 'reprovado'), 0) as reprovados,
+    COALESCE(COUNT(*) FILTER (WHERE status = 'solicitado'), 0) as em_analise,
+    COALESCE(COUNT(*), 0) as total,
+    COALESCE(ROUND(COUNT(*) FILTER (WHERE status = 'aprovado')::NUMERIC / NULLIF(COUNT(*), 0) * 100, 2), 0.00) as taxa_aprovacao
+FROM public.emprestimos;
+
+-- View: Extrato Completo (SEM NULL)
+CREATE OR REPLACE VIEW public.view_extrato_completo AS
+SELECT 
+    t.id_transacao,
+    t.data_transacao,
+    COALESCE(tt.nome, 'Não informado') as tipo_transacao,
+    t.valor,
+    COALESCE(t.descricao, 'Sem descrição') as descricao,
+    t.status,
+    COALESCE(c_origem.numero_conta, c_destino.numero_conta, 'N/A') as numero_conta,
+    COALESCE(cl_origem.nome, cl_destino.nome, 'N/A') as titular,
+    CASE 
+        WHEN t.id_conta_origem IS NOT NULL AND t.id_conta_destino IS NULL THEN 'Débito (Saque/Pagamento)'
+        WHEN t.id_conta_origem IS NULL AND t.id_conta_destino IS NOT NULL THEN 'Crédito (Depósito)'
+        WHEN t.id_conta_origem IS NOT NULL AND t.id_conta_destino IS NOT NULL THEN 'Transferência'
+        ELSE 'Não identificado'
+    END AS tipo_operacao,
+    COALESCE(t.id_conta_origem::TEXT, 'N/A') as id_conta_origem,
+    COALESCE(c_origem.numero_conta, 'N/A') as numero_conta_origem,
+    COALESCE(t.id_conta_destino::TEXT, 'N/A') as id_conta_destino,
+    COALESCE(c_destino.numero_conta, 'N/A') as numero_conta_destino
+FROM public.transacoes t
+LEFT JOIN public.tipos_transacao tt ON t.id_tipo_transacao = tt.id_tipo_transacao
+LEFT JOIN public.contas c_origem ON t.id_conta_origem = c_origem.id_conta
+LEFT JOIN public.contas c_destino ON t.id_conta_destino = c_destino.id_conta
+LEFT JOIN public.clientes cl_origem ON c_origem.id_cliente = cl_origem.id_cliente
+LEFT JOIN public.clientes cl_destino ON c_destino.id_cliente = cl_destino.id_cliente;
+
+-- ============================================
+-- PARTE 4: FUNÇÕES ANALÍTICAS AVANÇADAS
+-- ============================================
+
+-- Função: Análise de Período Customizado
+CREATE OR REPLACE FUNCTION public.analise_periodo_customizado(
+    p_data_inicio DATE,
+    p_data_fim DATE
+)
+RETURNS TABLE (
+    periodo TEXT,
+    total_transacoes BIGINT,
+    volume_total NUMERIC,
+    ticket_medio NUMERIC,
+    clientes_ativos BIGINT,
+    novos_clientes BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        p_data_inicio::TEXT || ' a ' || p_data_fim::TEXT as periodo,
+        COALESCE(COUNT(t.id_transacao), 0) as total_transacoes,
+        COALESCE(SUM(t.valor), 0.00) as volume_total,
+        COALESCE(AVG(t.valor), 0.00) as ticket_medio,
+        COALESCE(COUNT(DISTINCT COALESCE(t.id_conta_origem, t.id_conta_destino)), 0) as clientes_ativos,
+        COALESCE((SELECT COUNT(*) FROM public.clientes 
+         WHERE DATE(data_cadastro) BETWEEN p_data_inicio AND p_data_fim), 0) as novos_clientes
+    FROM public.transacoes t
+    WHERE DATE(t.data_transacao) BETWEEN p_data_inicio AND p_data_fim;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Versões com TIMESTAMP
+CREATE OR REPLACE FUNCTION public.analise_periodo_customizado(
+    p_data_inicio TIMESTAMP WITH TIME ZONE,
+    p_data_fim DATE
+)
+RETURNS TABLE (
+    periodo TEXT,
+    total_transacoes BIGINT,
+    volume_total NUMERIC,
+    ticket_medio NUMERIC,
+    clientes_ativos BIGINT,
+    novos_clientes BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM public.analise_periodo_customizado(
+        p_data_inicio::DATE,
+        p_data_fim
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.analise_periodo_customizado(
+    p_data_inicio TIMESTAMP WITHOUT TIME ZONE,
+    p_data_fim DATE
+)
+RETURNS TABLE (
+    periodo TEXT,
+    total_transacoes BIGINT,
+    volume_total NUMERIC,
+    ticket_medio NUMERIC,
+    clientes_ativos BIGINT,
+    novos_clientes BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM public.analise_periodo_customizado(
+        p_data_inicio::DATE,
+        p_data_fim
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Versão com TEXT
+CREATE OR REPLACE FUNCTION public.analise_periodo_customizado(
+    p_data_inicio TEXT,
+    p_data_fim TEXT
+)
+RETURNS TABLE (
+    periodo TEXT,
+    total_transacoes BIGINT,
+    volume_total NUMERIC,
+    ticket_medio NUMERIC,
+    clientes_ativos BIGINT,
+    novos_clientes BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM public.analise_periodo_customizado(
+        p_data_inicio::DATE,
+        p_data_fim::DATE
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Comparação Mensal
+CREATE OR REPLACE FUNCTION public.comparacao_mensal()
+RETURNS TABLE (
+    metrica TEXT,
+    mes_atual NUMERIC,
+    mes_anterior NUMERIC,
+    variacao_percentual NUMERIC
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH mes_atual AS (
+        SELECT 
+            COALESCE(COUNT(*), 0) as total_transacoes,
+            COALESCE(SUM(valor), 0.00) as volume_total
+        FROM public.transacoes
+        WHERE DATE_TRUNC('month', data_transacao) = DATE_TRUNC('month', CURRENT_DATE)
+    ),
+    mes_anterior AS (
+        SELECT 
+            COALESCE(COUNT(*), 0) as total_transacoes,
+            COALESCE(SUM(valor), 0.00) as volume_total
+        FROM public.transacoes
+        WHERE DATE_TRUNC('month', data_transacao) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    )
+    SELECT 
+        'Total de Transações'::TEXT,
+        ma.total_transacoes::NUMERIC,
+        mp.total_transacoes::NUMERIC,
+        CASE 
+            WHEN mp.total_transacoes = 0 AND ma.total_transacoes > 0 THEN 100.00
+            WHEN mp.total_transacoes = 0 AND ma.total_transacoes = 0 THEN 0.00
+            ELSE ROUND(((ma.total_transacoes - mp.total_transacoes)::NUMERIC / mp.total_transacoes * 100), 2)
+        END
+    FROM mes_atual ma, mes_anterior mp
+    
+    UNION ALL
+    
+    SELECT 
+        'Volume Total (R$)',
+        ma.volume_total,
+        mp.volume_total,
+        CASE 
+            WHEN mp.volume_total = 0 AND ma.volume_total > 0 THEN 100.00
+            WHEN mp.volume_total = 0 AND ma.volume_total = 0 THEN 0.00
+            ELSE ROUND(((ma.volume_total - mp.volume_total) / mp.volume_total * 100), 2)
+        END
+    FROM mes_atual ma, mes_anterior mp;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Calcular Churn Rate
+CREATE OR REPLACE FUNCTION public.calcular_churn_rate(p_meses INT DEFAULT 3)
+RETURNS TABLE (
+    periodo TEXT,
+    clientes_inicio INT,
+    clientes_perdidos INT,
+    churn_rate NUMERIC
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH periodo_analise AS (
+        SELECT 
+            COALESCE(COUNT(DISTINCT c.id_cliente), 0) as clientes_inicio
+        FROM public.contas c
+        WHERE c.data_abertura < CURRENT_DATE - (p_meses || ' months')::INTERVAL
+    ),
+    clientes_inativos AS (
+        SELECT 
+            COALESCE(COUNT(DISTINCT c.id_cliente), 0) as total_inativos
+        FROM public.contas c
+        LEFT JOIN public.transacoes t ON (c.id_conta = t.id_conta_origem OR c.id_conta = t.id_conta_destino)
+        WHERE c.data_abertura < CURRENT_DATE - (p_meses || ' months')::INTERVAL
+        AND (t.data_transacao IS NULL OR t.data_transacao < CURRENT_DATE - (p_meses || ' months')::INTERVAL)
+    )
+    SELECT 
+        'Últimos ' || p_meses || ' meses' as periodo,
+        COALESCE(pa.clientes_inicio, 0)::INT,
+        COALESCE(ci.total_inativos, 0)::INT,
+        COALESCE(ROUND(ci.total_inativos::NUMERIC / NULLIF(pa.clientes_inicio, 0) * 100, 2), 0.00) as churn_rate
+    FROM periodo_analise pa, clientes_inativos ci;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Calcular CLV (Customer Lifetime Value)
+CREATE OR REPLACE FUNCTION public.calcular_clv(p_id_cliente INT)
+RETURNS NUMERIC AS $$
+DECLARE
+    v_receita_total NUMERIC;
+    v_total_transacoes INT;
+    v_meses_ativo INT;
+    v_receita_media_mensal NUMERIC;
+    v_clv NUMERIC;
+    v_saldo_total NUMERIC;
+BEGIN
+    SELECT 
+        GREATEST(
+            EXTRACT(YEAR FROM AGE(CURRENT_DATE, data_cadastro)) * 12 + 
+            EXTRACT(MONTH FROM AGE(CURRENT_DATE, data_cadastro)),
+            1
+        )
+    INTO v_meses_ativo
+    FROM public.clientes
+    WHERE id_cliente = p_id_cliente;
+    
+    SELECT 
+        COALESCE(SUM(t.valor), 0),
+        COUNT(t.id_transacao)
+    INTO v_receita_total, v_total_transacoes
+    FROM public.transacoes t
+    JOIN public.contas c ON (t.id_conta_origem = c.id_conta OR t.id_conta_destino = c.id_conta)
+    WHERE c.id_cliente = p_id_cliente;
+    
+    SELECT COALESCE(SUM(saldo), 0)
+    INTO v_saldo_total
+    FROM public.contas
+    WHERE id_cliente = p_id_cliente;
+    
+    v_receita_media_mensal := (v_receita_total * 0.005) / v_meses_ativo;
+    v_clv := (v_receita_media_mensal * v_meses_ativo * 0.9) + (v_saldo_total * 0.001 * 12);
+    
+    RETURN ROUND(v_clv, 2);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Calcular CLV de Todos os Clientes
+CREATE OR REPLACE FUNCTION public.calcular_clv_todos()
+RETURNS TABLE (
+    id_cliente INT,
+    nome VARCHAR(100),
+    saldo_total NUMERIC,
+    total_transacoes BIGINT,
+    volume_transacionado NUMERIC,
+    meses_como_cliente INT,
+    clv NUMERIC,
+    classificacao TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        cl.id_cliente,
+        cl.nome,
+        COALESCE(SUM(c.saldo), 0) as saldo_total,
+        (SELECT COUNT(*) 
+         FROM public.transacoes t 
+         JOIN public.contas co ON (t.id_conta_origem = co.id_conta OR t.id_conta_destino = co.id_conta)
+         WHERE co.id_cliente = cl.id_cliente) as total_transacoes,
+        (SELECT COALESCE(SUM(t.valor), 0)
+         FROM public.transacoes t 
+         JOIN public.contas co ON (t.id_conta_origem = co.id_conta OR t.id_conta_destino = co.id_conta)
+         WHERE co.id_cliente = cl.id_cliente) as volume_transacionado,
+        (EXTRACT(YEAR FROM AGE(CURRENT_DATE, cl.data_cadastro)) * 12 + 
+         EXTRACT(MONTH FROM AGE(CURRENT_DATE, cl.data_cadastro)))::INT as meses_cliente,
+        public.calcular_clv(cl.id_cliente) as clv,
+        CASE 
+            WHEN public.calcular_clv(cl.id_cliente) >= 1000 THEN 'Alto Valor'
+            WHEN public.calcular_clv(cl.id_cliente) >= 500 THEN 'Médio Valor'
+            WHEN public.calcular_clv(cl.id_cliente) >= 100 THEN 'Baixo Valor'
+            ELSE 'Muito Baixo'
+        END as classificacao
+    FROM public.clientes cl
+    LEFT JOIN public.contas c ON cl.id_cliente = c.id_cliente
+    WHERE cl.status = 'ativo'
+    GROUP BY cl.id_cliente, cl.nome, cl.data_cadastro
+    ORDER BY clv DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Segmentar Clientes (RFM)
+CREATE OR REPLACE FUNCTION public.segmentar_clientes()
+RETURNS TABLE (
+    id_cliente INT,
+    nome VARCHAR(100),
+    recency_days INT,
+    frequency BIGINT,
+    monetary NUMERIC,
+    segmento TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH rfm AS (
+        SELECT 
+            cl.id_cliente,
+            cl.nome,
+            COALESCE(EXTRACT(DAY FROM (CURRENT_DATE - MAX(t.data_transacao)))::INT, 9999) as recency,
+            COALESCE(COUNT(t.id_transacao), 0) as frequency,
+            COALESCE(SUM(t.valor), 0.00) as monetary
+        FROM public.clientes cl
+        LEFT JOIN public.contas c ON cl.id_cliente = c.id_cliente
+        LEFT JOIN public.transacoes t ON (c.id_conta = t.id_conta_origem OR c.id_conta = t.id_conta_destino)
+        WHERE cl.status = 'ativo'
+        AND (t.data_transacao >= CURRENT_DATE - INTERVAL '180 days' OR t.data_transacao IS NULL)
+        GROUP BY cl.id_cliente, cl.nome
+    )
+    SELECT 
+        id_cliente,
+        nome,
+        recency as recency_days,
+        frequency,
+        monetary,
+        CASE 
+            WHEN recency <= 30 AND frequency >= 10 AND monetary >= 5000 THEN 'VIP'::TEXT
+            WHEN recency <= 60 AND frequency >= 5 AND monetary >= 2000 THEN 'Premium'::TEXT
+            WHEN recency <= 90 AND frequency >= 3 THEN 'Regular'::TEXT
+            WHEN recency > 120 THEN 'Em Risco'::TEXT
+            WHEN frequency = 0 THEN 'Novo'::TEXT
+            ELSE 'Ativo'::TEXT
+        END as segmento
+    FROM rfm
+    ORDER BY monetary DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Função: Relatório Executivo Mensal
+CREATE OR REPLACE FUNCTION public.relatorio_executivo_mensal(p_mes INT, p_ano INT)
+RETURNS TABLE (
+    secao TEXT,
+    metrica TEXT,
+    valor_metrica TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT * FROM (
+        SELECT 
+            'RESUMO GERAL'::TEXT as secao_nome,
+            'Novos Clientes'::TEXT as metrica_nome,
+            COALESCE(COUNT(*)::TEXT, '0') as valor_texto
+        FROM public.clientes
+        WHERE EXTRACT(MONTH FROM data_cadastro) = p_mes 
+        AND EXTRACT(YEAR FROM data_cadastro) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'RESUMO GERAL'::TEXT,
+            'Total de Transações'::TEXT,
+            COALESCE(COUNT(*)::TEXT, '0')
+        FROM public.transacoes
+        WHERE EXTRACT(MONTH FROM data_transacao) = p_mes 
+        AND EXTRACT(YEAR FROM data_transacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'RESUMO GERAL'::TEXT,
+            'Volume Transacionado (R$)'::TEXT,
+            COALESCE(TO_CHAR(SUM(t.valor), 'FM999G999G999D00'), '0,00')
+        FROM public.transacoes t
+        WHERE EXTRACT(MONTH FROM t.data_transacao) = p_mes 
+        AND EXTRACT(YEAR FROM t.data_transacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'RESUMO GERAL'::TEXT,
+            'Ticket Médio (R$)'::TEXT,
+            COALESCE(TO_CHAR(AVG(t.valor), 'FM999G999D00'), '0,00')
+        FROM public.transacoes t
+        WHERE EXTRACT(MONTH FROM t.data_transacao) = p_mes 
+        AND EXTRACT(YEAR FROM t.data_transacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'EMPRÉSTIMOS'::TEXT,
+            'Empréstimos Solicitados'::TEXT,
+            COALESCE(COUNT(*)::TEXT, '0')
+        FROM public.emprestimos
+        WHERE EXTRACT(MONTH FROM data_solicitacao) = p_mes 
+        AND EXTRACT(YEAR FROM data_solicitacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'EMPRÉSTIMOS'::TEXT,
+            'Empréstimos Aprovados'::TEXT,
+            COALESCE(COUNT(*)::TEXT, '0')
+        FROM public.emprestimos
+        WHERE status = 'aprovado'
+        AND EXTRACT(MONTH FROM data_aprovacao) = p_mes 
+        AND EXTRACT(YEAR FROM data_aprovacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'EMPRÉSTIMOS'::TEXT,
+            'Valor Total Aprovado (R$)'::TEXT,
+            COALESCE(TO_CHAR(SUM(e.valor_aprovado), 'FM999G999G999D00'), '0,00')
+        FROM public.emprestimos e
+        WHERE e.status = 'aprovado'
+        AND EXTRACT(MONTH FROM e.data_aprovacao) = p_mes 
+        AND EXTRACT(YEAR FROM e.data_aprovacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'EMPRÉSTIMOS'::TEXT,
+            'Taxa de Juros Média (%)'::TEXT,
+            COALESCE(TO_CHAR(AVG(e.taxa_juros), 'FM999D00'), '0,00')
+        FROM public.emprestimos e
+        WHERE e.status = 'aprovado'
+        AND EXTRACT(MONTH FROM e.data_aprovacao) = p_mes 
+        AND EXTRACT(YEAR FROM e.data_aprovacao) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'CONTAS'::TEXT,
+            'Novas Contas'::TEXT,
+            COALESCE(COUNT(*)::TEXT, '0')
+        FROM public.contas
+        WHERE EXTRACT(MONTH FROM data_abertura) = p_mes 
+        AND EXTRACT(YEAR FROM data_abertura) = p_ano
+        
+        UNION ALL
+        
+        SELECT 
+            'CONTAS'::TEXT,
+            'Saldo Total das Novas Contas (R$)'::TEXT,
+            COALESCE(TO_CHAR(SUM(c.saldo), 'FM999G999G999D00'), '0,00')
+        FROM public.contas c
+        WHERE EXTRACT(MONTH FROM c.data_abertura) = p_mes 
+        AND EXTRACT(YEAR FROM c.data_abertura) = p_ano
+    ) AS relatorio
+    ORDER BY secao_nome, metrica_nome;
+END;
+$$ LANGUAGE plpgsql;
+
+-- View: KPIs Principais (SEM NULL)
+CREATE OR REPLACE VIEW public.kpis_principais AS
+SELECT 
+    'CAC - Custo de Aquisição de Cliente' as kpi,
+    '(Investimento em Marketing / Novos Clientes)' as formula,
+    0.00 as valor
+UNION ALL
+SELECT 
+    'LTV - Lifetime Value',
+    'Valor médio das transações * Frequência * Tempo de vida',
+    ROUND((SELECT AVG(public.calcular_clv(id_cliente)) FROM public.clientes WHERE status = 'ativo'), 2)
+UNION ALL
+SELECT 
+    'Churn Rate (%)',
+    '(Clientes Perdidos / Total de Clientes) * 100',
+    COALESCE((SELECT churn_rate FROM public.calcular_churn_rate(3)), 0.00)
+UNION ALL
+SELECT 
+    'NPS - Net Promoter Score',
+    '% Promotores - % Detratores',
+    0.00
+UNION ALL
+SELECT 
+    'Taxa de Conversão (%)',
+    '(Contas Abertas / Leads) * 100',
+    ROUND((SELECT COUNT(*) FROM public.contas)::NUMERIC / NULLIF((SELECT COUNT(*) FROM public.clientes), 0) * 100, 2)
+UNION ALL
+SELECT 
+    'Saldo Total em Contas (R$)',
+    'Soma de todos os saldos das contas ativas',
+    ROUND((SELECT SUM(saldo) FROM public.contas WHERE status = 'ativa'), 2)
+UNION ALL
+SELECT 
+    'Ticket Médio (R$)',
+    'Valor médio das transações',
+    ROUND((SELECT AVG(valor) FROM public.transacoes), 2)
+UNION ALL
+SELECT 
+    'Taxa de Inadimplência (%)',
+    '(Empréstimos Inadimplentes / Total Empréstimos) * 100',
+    ROUND(
+        COALESCE(
+            (SELECT COUNT(*) FILTER (WHERE status = 'inadimplente')::NUMERIC 
+             FROM public.emprestimos) / 
+            NULLIF((SELECT COUNT(*) FROM public.emprestimos WHERE status IN ('aprovado', 'inadimplente')), 0) * 100,
+            0
+        ),
+        2
+    );
+
+-- ============================================
+-- TRIGGERS
+-- ============================================
+
+-- Trigger: Validar saldo antes de atualização
+CREATE OR REPLACE FUNCTION public.before_update_saldo()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.saldo < 0 THEN
+        RAISE EXCEPTION 'Saldo não pode ser negativo';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_before_update_saldo
+BEFORE UPDATE OF saldo ON public.contas
+FOR EACH ROW
+EXECUTE FUNCTION public.before_update_saldo();
+
+-- ============================================
+-- MENSAGEM DE INSTALAÇÃO CONCLUÍDA
+-- ============================================
+
+DO $$
+BEGIN
+    RAISE NOTICE '====================================================================';
+    RAISE NOTICE 'SISTEMA BANCÁRIO COMPLETO - INSTALAÇÃO CONCLUÍDA!';
+    RAISE NOTICE '====================================================================';
