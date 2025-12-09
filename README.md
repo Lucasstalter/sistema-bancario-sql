@@ -70,33 +70,7 @@ clientes (1) ──── (N) contas (1) ──── (N) transacoes
 - PostgreSQL 12+
 - Cliente SQL (psql, pgAdmin, DBeaver, ou VS Code com SQLTools)
 
-### Instalação
 
-1. **Clone o repositório**
-```bash
-git clone https://github.com/seu-usuario/sistema-bancario-sql.git
-cd sistema-bancario-sql
-```
-
-2. **Crie o banco de dados**
-```bash
-createdb banco_sistema
-```
-
-3. **Execute o script de instalação**
-```bash
-psql -d banco_sistema -f 01-instalacao/sistema_bancario_completo.sql
-```
-
-4. **Execute o sistema de analytics**
-```bash
-psql -d banco_sistema -f 02-analytics/sistema_analytics_bancario.sql
-```
-
-5. **Aplique as correções (opcional)**
-```bash
-psql -d banco_sistema -f 03-correcoes/corrigir_todos_nulls.sql
-```
 
 ## 📝 Queries de Exemplo
 
